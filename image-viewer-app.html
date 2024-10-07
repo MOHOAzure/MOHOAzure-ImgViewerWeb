@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Full Screen Image Viewer</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            background-color: #1a1a1a;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        #mainViewer {
+            width: 100%;
+            height: calc(100% - 60px);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+        #mainImage {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+        }
+        #thumbnailStrip {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 60px;
+            background-color: rgba(0, 0, 0, 0.7);
+            overflow-x: auto;
+            overflow-y: hidden;
+            white-space: nowrap;
+            scrollbar-width: thin;
+            scrollbar-color: #666 #333;
+        }
+        .thumbnail {
+            display: inline-block;
+            height: 50px;
+            margin: 5px 2px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .thumbnail:hover {
+            transform: scale(1.1);
+        }
+        #folderSelector {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.3s, visibility 0.3s;
+        }
+        #folderSelector.hidden {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+        #dropZone {
+            width: 80%;
+            max-width: 500px;
+            height: 200px;
+            border: 2px dashed #666;
+            border-radius: 5px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            font-size: 18px;
+        }
+        .button {
+            padding: 15px 30px;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 18px;
+            border-radius: 5px;
+            margin: 10px;
+            transition: background-color 0.3s;
+        }
+        #openButton {
+            background-color: #4CAF50;
+        }
+        #openButton:hover {
+            background-color: #45a049;
+        }
+        #clearDataButton {
+            background-color: #f44336;
+        }
+        #clearDataButton:hover {
+            background-color: #da190b;
+        }
+        #currentFolder {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 12px;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 3px;
+        }
+        #controlPanel {
+            position: fixed;
+            bottom: 70px;
+            right: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .controlButton {
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            border: none;
+            padding: 10px;
+            cursor: pointer;
+            font-size: 14px;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: background-color 0.3s;
+        }
+        .controlButton:hover {
+            background-color: rgba(0, 0, 0, 0.9);
+        }
+    </style>
+</head>
+<body>
+    <div id="mainViewer">
+        <img id="mainImage" alt="Main Image">
+    </div>
+    <div id="thumbnailStrip"></div>
+    <div id="folderSelector" class="hidden">
+        <div id="dropZone">
+            <button id="openButton" class="button">Select Folder</button>
+            <p>or drop folder here</p>
+        </div>
+    </div>
+    <div id="currentFolder"></div>
+    <div id="controlPanel">
+        <button id="fullscreenButton" class="controlButton" title="Toggle Fullscreen">⛶</button>
+        <button id="changeFolderButton" class="controlButton" title="Change Folder">📁</button>
+        <button id="clearDataButton" class="controlButton" title="Clear Data">🗑️</button>
+    </div>
+
+    <script>
+        let currentIndex = 0;
+        let files = [];
+        let currentFolderHandle = null;
+
+        const mainImage = document.getElementById('mainImage');
+        const thumbnailStrip = document.getElementById('thumbnailStrip');
+        const openButton = document.getElementById('openButton');
+        const currentFolderDiv = document.getElementById('currentFolder');
+        const folderSelector = document.getElementById('folderSelector');
+        const dropZone = document.getElementById('dropZone');
+        const fullscreenButton = document.getElementById('fullscreenButton');
+        const changeFolderButton = document.getElementById('changeFolderButton');
+        const clearDataButton = document.getElementById('clearDataButton');
+
+        openButton.addEventListener('click', selectFolder);
+        fullscreenButton.addEventListener('click', toggleFullscreen);
+        changeFolderButton.addEventListener('click', showFolderSelector);
+        clearDataButton.addEventListener('click', clearAllData);
+
+        folderSelector.addEventListener('click', (e) => {
+            if (e.target === folderSelector) {
+                hideFolderSelector();
+            }
+        });
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+        });
+
+        dropZone.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const items = e.dataTransfer.items;
+            if (items) {
+                const item = items[0];
+                if (item.kind === 'file') {
+                    const entry = await item.getAsFileSystemHandle();
+                    if (entry.kind === 'directory') {
+                        await loadImagesFromFolder(entry);
+                    }
+                }
+            }
+        });
+
+        async function selectFolder() {
+            try {
+                if ('showDirectoryPicker' in window) {
+                    const handle = await window.showDirectoryPicker();
+                    await loadImagesFromFolder(handle);
+                } else {
+                    alert('Your browser does not support the File System Access API. Please use a modern browser or manually select images.');
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.webkitdirectory = true;
+                    input.addEventListener('change', handleManualFolderSelection);
+                    input.click();
+                }
+            } catch (error) {
+                console.error('Error selecting folder:', error);
+                if (error.name !== 'AbortError') {
+                    alert('An error occurred while selecting the folder. Please try again.');
+                }
+            }
+        }
+
+        function handleManualFolderSelection(event) {
+            const files = event.target.files;
+            if (files.length > 0) {
+                const folderPath = files[0].webkitRelativePath.split('/')[0];
+                loadImagesFromFileList(files, folderPath);
+            }
+        }
+
+        function loadImagesFromFileList(fileList, folderName) {
+            files = Array.from(fileList)
+                .filter(file => file.type.startsWith('image/'))
+                .map(file => URL.createObjectURL(file));
+
+            if (files.length > 0) {
+                currentIndex = 0;
+                showImage(currentIndex);
+                createThumbnails();
+                hideFolderSelector();
+                currentFolderDiv.textContent = `Current folder: ${folderName}`;
+                localStorage.setItem('lastFolderName', folderName);
+            } else {
+                alert('No image files found in the selected folder.');
+            }
+        }
+
+        async function loadImagesFromFolder(folderHandle) {
+            currentFolderHandle = folderHandle;
+            localStorage.setItem('lastFolderName', folderHandle.name);
+            currentFolderDiv.textContent = `Current folder: ${folderHandle.name}`;
+
+            files = [];
+            for await (const entry of folderHandle.values()) {
+                if (entry.kind === 'file' && entry.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+                    const file = await entry.getFile();
+                    files.push(URL.createObjectURL(file));
+                }
+            }
+
+            if (files.length > 0) {
+                currentIndex = 0;
+                showImage(currentIndex);
+                createThumbnails();
+                hideFolderSelector();
+            } else {
+                alert('No image files found in the selected folder.');
+            }
+        }
+
+        function showImage(index) {
+            if (index >= 0 && index < files.length) {
+                mainImage.style.opacity = '0';
+                mainImage.src = files[index];
+                currentIndex = index;
+                fitImageToScreen();
+                setTimeout(() => {
+                    mainImage.style.opacity = '1';
+                }, 50);
+            }
+        }
+
+        function fitImageToScreen() {
+            const img = mainImage;
+            const viewer = document.getElementById('mainViewer');
+            const viewerRatio = viewer.clientWidth / viewer.clientHeight;
+            const imgRatio = img.naturalWidth / img.naturalHeight;
+
+            if (imgRatio > viewerRatio) {
+                img.style.width = '100%';
+                img.style.height = 'auto';
+            } else {
+                img.style.width = 'auto';
+                img.style.height = '100%';
+            }
+        }
+
+        function createThumbnails() {
+            thumbnailStrip.innerHTML = '';
+            files.forEach((file, index) => {
+                const thumb = document.createElement('img');
+                thumb.src = file;
+                thumb.className = 'thumbnail';
+                thumb.onclick = () => showImage(index);
+                thumbnailStrip.appendChild(thumb);
+            });
+        }
+
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen();
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                }
+            }
+        }
+
+        function showFolderSelector() {
+            folderSelector.classList.remove('hidden');
+        }
+
+        function hideFolderSelector() {
+            folderSelector.classList.add('hidden');
+        }
+
+        function clearAllData() {
+            currentFolderHandle = null;
+            files.forEach(URL.revokeObjectURL);
+            files = [];
+            currentFolderDiv.textContent = '';
+            thumbnailStrip.innerHTML = '';
+            mainImage.src = '';
+            localStorage.removeItem('lastFolderName');
+            alert('All data has been cleared and folder access has been revoked.');
+        }
+
+        window.addEventListener('wheel', (event) => {
+            if (event.target.closest('#thumbnailStrip')) {
+                thumbnailStrip.scrollLeft += event.deltaY;
+            } else {
+                if (event.deltaY > 0) {
+                    showImage(currentIndex + 1);
+                } else {
+                    showImage(currentIndex - 1);
+                }
+            }
+        });
+
+        window.addEventListener('resize', fitImageToScreen);
+
+        window.addEventListener('load', () => {
+            const lastFolderName = localStorage.getItem('lastFolderName');
+            if (lastFolderName) {
+                currentFolderDiv.textContent = `Last folder: ${lastFolderName}`;
+            }
+            showFolderSelector();
+        });
+    </script>
+</body>
+</html>

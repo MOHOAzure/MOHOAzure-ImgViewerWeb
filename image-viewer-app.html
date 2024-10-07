@@ -258,7 +258,7 @@
 
             files = [];
             for await (const entry of folderHandle.values()) {
-                if (entry.kind === 'file' && entry.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+                if (entry.kind === 'file' && entry.name.match(/\.(jpg|jpeg|png|gif|webp|avif)$/i)) {
                     const file = await entry.getFile();
                     files.push(URL.createObjectURL(file));
                 }
